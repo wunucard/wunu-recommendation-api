@@ -25,7 +25,7 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
     user_df = df[df['card_name'].isin(user_cards)].copy()
 
     def fmt(rate):
-        return f"{float(rate) * 100:.0f}%" if pd.notnull(rate) else ""
+        return f"{float(rate) * 100:.1f}%" if pd.notnull(rate) else ""
 
     recommendations = []
     for _, row in user_df.iterrows():
