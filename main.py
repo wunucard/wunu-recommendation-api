@@ -14,7 +14,7 @@ app = FastAPI()
 # Create Supabase client
 supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY")
+    os.getenv("SUPABASE_SERVICE_KEY")
 )
 
 # Enable CORS
