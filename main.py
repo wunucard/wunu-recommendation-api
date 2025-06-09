@@ -61,12 +61,9 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         if "yes" in rent_capability:
             recs.append(f"✅ Good for rent payments ({rewards_on_rent}, {rent_fee})")
         elif "limited" in rent_capability:
-            recs.append(f"⚠️ Can be used for rent ({rewards_on_rent}, {rent_fee})")
+            recs.append(f"⚠️ Rent payments typically incur fees; rewards may not offset costs.")
         elif "no" in rent_capability:
             recs.append("❌ Not suitable for rent payments")
-
-        if rent_notes:
-            recs.append(f"📝 {rent_notes}")
 
         # Catch-all card logic
         if float(row['base_rate']) >= 0.015:
