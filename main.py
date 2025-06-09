@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import List
 import pandas as pd
 import os
+from supabase import create_client, Client
 
 app = FastAPI()
 
