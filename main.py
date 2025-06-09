@@ -32,6 +32,7 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         card_name = row['card_name']
         recs = []
 
+        # Bonus categories
         if pd.notnull(row['bonus_category_1']) and float(row['bonus_rate_1']) > float(row['base_rate']):
             recs.append(f"{row['bonus_category_1']}: {fmt(row['bonus_rate_1'])}")
         if pd.notnull(row['bonus_category_2']) and float(row['bonus_rate_2']) > float(row['base_rate']):
@@ -39,16 +40,33 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         if pd.notnull(row['bonus_category_3']) and float(row['bonus_rate_3']) > float(row['base_rate']):
             recs.append(f"{row['bonus_category_3']}: {fmt(row['bonus_rate_3'])}")
 
+        # Foreign transaction
         try:
             foreign_fee = float(row['foreign_transaction_fee'])
         except:
-            foreign_fee = 0.03  # Default if missing
-
+            foreign_fee = 0.03
         if foreign_fee == 0.0:
             recs.append("✅ Good for foreign purchases")
         else:
             recs.append("❌ Avoid abroad (foreign fee)")
 
+        # Rent payment
+        rent_capability = str(row.get("rent_payment_capability", "")).strip().lower()
+        rewards_on_rent = str(row.get("rewards_on_rent", "None")).strip()
+        rent_fee = str(row.get("transaction_fee", "Unknown")).strip()
+        rent_notes = str(row.get("notes_rent_payments", "")).strip()
+
+        if rent_capability == "✅ yes":
+            recs.append(f"✅ Good for rent payments ({rewards_on_rent}, {rent_fee})")
+        elif rent_capability == "⚠️ limited":
+            recs.append(f"⚠️ Can be used for rent ({rewards_on_rent}, {rent_fee})")
+        elif rent_capability == "❌ no":
+            recs.append("❌ Not suitable for rent payments")
+
+        if rent_notes:
+            recs.append(f"📝 {rent_notes}")
+
+        # Catch-all card logic
         if float(row['base_rate']) >= 0.015:
             recs.append(f"Use as catch-all card ({fmt(row['base_rate'])})")
 
@@ -58,6 +76,7 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         })
 
     return recommendations
+
 
 # API endpoint
 @app.post("/recommend")
