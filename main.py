@@ -102,7 +102,16 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
 
 # API endpoint
 @app.post("/recommend")
-async def recommend(request: CardRequest):
-    cards = request.cards
+async def recommend(request: Request):
+    data = await request.json()
+    cards = data.get("cards", [])
     recommendations = optimize_credit_card_usage(cards)
+
+    # Log the query
+    supabase.table("recommendation_logs").insert({
+        "cards": cards,
+        "ip_address": request.client.host,
+        "user_agent": request.headers.get("user-agent")
+    }).execute()
+
     return {"recommendations": recommendations}
