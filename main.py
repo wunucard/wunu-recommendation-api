@@ -46,7 +46,7 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         except:
             foreign_fee = 0.03
         if foreign_fee == 0.0:
-            recs.append("✅ Good for foreign purchases")
+            recs.append("✅ Good for foreign purchases (no foreign fee)")
         else:
             recs.append("❌ Avoid abroad (foreign fee)")
 
