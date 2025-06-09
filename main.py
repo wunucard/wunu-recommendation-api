@@ -56,11 +56,11 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         rent_fee = str(row.get("transaction_fee", "Unknown")).strip()
         rent_notes = str(row.get("notes_rent_payments", "")).strip()
 
-        if rent_capability == "Yes":
+        if rent_capability == "yes":
             recs.append(f"✅ Good for rent payments ({rewards_on_rent}, {rent_fee})")
-        elif rent_capability == "Limited":
+        elif rent_capability == "limited":
             recs.append(f"⚠️ Can be used for rent ({rewards_on_rent}, {rent_fee})")
-        elif rent_capability == "No":
+        elif rent_capability == "no":
             recs.append("❌ Not suitable for rent payments")
 
         if rent_notes:
