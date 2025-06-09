@@ -51,8 +51,6 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
             recs.append("❌ Avoid abroad (foreign fee)")
 
         # Rent payment
-
-
         rent_capability = str(row.get("rent_payment_capability", "")).strip().lower()
         rewards_on_rent = str(row.get("rewards_on_rent", "None")).strip()
         rent_fee = str(row.get("transaction_fee", "Unknown")).strip()
