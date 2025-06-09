@@ -63,7 +63,10 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
         elif "no" in rent_capability:
             recs.append("❌ Not suitable for rent payments")
 
-        
+        # Catch-all card logic
+        if float(row['base_rate']) >= 0.015:
+            recs.append(f"Use as catch-all card ({fmt(row['base_rate'])})")
+       
         # AFTER processing all cards, determine the best catch-all card
         best_catchall = user_df.loc[user_df['base_rate'].idxmax()]
         best_catchall_rate = float(best_catchall['base_rate'])
