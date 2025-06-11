@@ -35,65 +35,109 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
     def fmt(rate):
         return f"{float(rate) * 100:.1f}%" if pd.notnull(rate) else ""
     
+    def get_effective_rate(row, category_rate, is_points=False):
+        if pd.isnull(category_rate):
+            return 0
+        rate = float(category_rate)
+        if is_points:
+            # Apply point value multiplier for points cards
+            point_value = float(row.get('base_redemption_value', 1))
+            rate *= point_value
+        return rate
+    
+    # Define major spending categories to analyze
+    categories = {
+        'Dining': ['Dining', 'Restaurants', 'Restaurants worldwide'],
+        'Travel': ['Travel', 'Flights', 'Hotels', 'Air Travel'],
+        'Groceries': ['Supermarkets', 'Grocery Stores', 'U.S. Supermarkets'],
+        'Gas': ['Gas', 'Gas Stations'],
+        'Online Shopping': ['Online Shopping', 'Online Retail'],
+        'Entertainment': ['Entertainment', 'Streaming Services'],
+        'Drugstores': ['Drugstores', 'Drug Stores']
+    }
+    
     recommendations = []
     
-    # First pass: Build recommendations for each card (without catch-all logic)
-    for _, row in user_df.iterrows():
-        card_name = row['card_name']
-        recs = []
+    # Find best card for each category
+    for category, keywords in categories.items():
+        best_card = None
+        best_rate = 0
+        best_instructions = ""
         
-        # Bonus categories
-        if pd.notnull(row['bonus_category_1']) and float(row['bonus_rate_1']) > float(row['base_rate']):
-            recs.append(f"{row['bonus_category_1']}: {fmt(row['bonus_rate_1'])}")
-        if pd.notnull(row['bonus_category_2']) and float(row['bonus_rate_2']) > float(row['base_rate']):
-            recs.append(f"{row['bonus_category_2']}: {fmt(row['bonus_rate_2'])}")
-        if pd.notnull(row['bonus_category_3']) and float(row['bonus_rate_3']) > float(row['base_rate']):
-            recs.append(f"{row['bonus_category_3']}: {fmt(row['bonus_rate_3'])}")
+        for _, row in user_df.iterrows():
+            # Check bonus categories
+            for i in range(1, 4):
+                bonus_cat = str(row.get(f'bonus_category_{i}', '')).lower()
+                bonus_rate = row.get(f'bonus_rate_{i}')
+                
+                if any(keyword.lower() in bonus_cat for keyword in keywords):
+                    effective_rate = get_effective_rate(row, bonus_rate, 'POINTS' in str(row.get('currency_type', '')))
+                    
+                    if effective_rate > best_rate:
+                        best_rate = effective_rate
+                        best_card = row['card_name']
+                        
+                        # Add special instructions
+                        if row.get('rotating_categories', False):
+                            best_instructions = f"Select this as your quarterly category"
+                        elif row.get('user_selectable_categories', False):
+                            best_instructions = f"Select this as your category"
+                        elif row.get('activation_required', False):
+                            best_instructions = f"Remember to activate this category"
+                        else:
+                            best_instructions = ""
         
-        # Foreign transaction
-        try:
-            foreign_fee = float(row['foreign_transaction_fee'])
-        except:
-            foreign_fee = 0.03
-        if foreign_fee == 0.0:
-            recs.append("✅ Good for foreign purchases (no foreign fee)")
-        else:
-            recs.append("❌ Avoid abroad (foreign fee)")
-        
-        # Rent payment
-        rent_capability = str(row.get("rent_payment_capability", "")).strip().lower()
-        rewards_on_rent = str(row.get("rewards_on_rent", "None")).strip()
-        rent_fee = str(row.get("transaction_fee", "Unknown")).strip()
-        rent_notes = str(row.get("notes_rent_payments", "")).strip()
-        
-        if "yes" in rent_capability:
-            recs.append(f"✅ Good for rent payments ({rewards_on_rent}, {rent_fee})")
-        elif "limited" in rent_capability:
-            recs.append(f"⚠️ Rent payments typically incur fees; rewards may not offset costs.")
-        elif "no" in rent_capability:
-            recs.append("❌ Not suitable for rent payments")
-        
-        recommendations.append({
-            "Card Name": card_name,
-            "Optimal Uses": "\n".join(recs)
-        })
+        if best_card:
+            card_info = user_df[user_df['card_name'] == best_card].iloc[0]
+            currency_type = str(card_info.get('currency_type', 'CASHBACK'))
+            
+            if currency_type == 'POINTS':
+                point_value = float(card_info.get('base_redemption_value', 1))
+                effective_rate = best_rate * point_value
+                reward_desc = f"{fmt(best_rate)} points (equivalent to {fmt(effective_rate)} when redeemed)"
+            else:
+                reward_desc = f"{fmt(best_rate)} cashback"
+            
+            recommendations.append({
+                "Category": category,
+                "Card": best_card,
+                "Reward Rate": reward_desc,
+                "Instructions": best_instructions
+            })
     
-    # Second pass: Determine the best catch-all card AFTER processing all cards
-    if not user_df.empty:
-        # Find card with highest base rate
-        best_catchall = user_df.loc[user_df['base_rate'].idxmax()]
-        best_catchall_rate = float(best_catchall['base_rate'])
+    # Find best catch-all card
+    best_catchall = None
+    best_catchall_rate = 0
+    
+    for _, row in user_df.iterrows():
+        base_rate = float(row.get('base_rate', 0))
+        if 'POINTS' in str(row.get('currency_type', '')):
+            point_value = float(row.get('base_redemption_value', 1))
+            effective_rate = base_rate * point_value
+        else:
+            effective_rate = base_rate
+            
+        if effective_rate > best_catchall_rate:
+            best_catchall_rate = effective_rate
+            best_catchall = row['card_name']
+    
+    if best_catchall:
+        card_info = user_df[user_df['card_name'] == best_catchall].iloc[0]
+        currency_type = str(card_info.get('currency_type', 'CASHBACK'))
         
-        # Only recommend as catch-all if rate is good enough
-        if best_catchall_rate >= 0.015:
-            # Add catch-all recommendation to the best card only
-            for rec in recommendations:
-                if rec["Card Name"] == best_catchall['card_name']:
-                    if rec["Optimal Uses"]:  # Add newline if there are existing recommendations
-                        rec["Optimal Uses"] += f"\n🎯 **Best catch-all card** ({fmt(best_catchall_rate)})"
-                    else:  # First recommendation for this card
-                        rec["Optimal Uses"] = f"🎯 **Best catch-all card** ({fmt(best_catchall_rate)})"
-                    break
+        if currency_type == 'POINTS':
+            point_value = float(card_info.get('base_redemption_value', 1))
+            effective_rate = best_catchall_rate * point_value
+            reward_desc = f"{fmt(best_catchall_rate)} points (equivalent to {fmt(effective_rate)} when redeemed)"
+        else:
+            reward_desc = f"{fmt(best_catchall_rate)} cashback"
+            
+        recommendations.append({
+            "Category": "Everything else",
+            "Card": best_catchall,
+            "Reward Rate": reward_desc,
+            "Instructions": "Use this card for all other purchases"
+        })
     
     return recommendations
 
