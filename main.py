@@ -5,6 +5,8 @@ from typing import List
 import pandas as pd
 import os
 import re
+import json
+import csv
 # from supabase import create_client, Client  # Move import inside app section
 
 app = FastAPI()
@@ -22,172 +24,222 @@ app.add_middleware(
 class CardRequest(BaseModel):
     cards: List[str]
 
-# Credit card recommendation logic
+# Manual normalization mapping for categories (shared by all functions)
+manual = {
+    'Travel (via Chase Travel portal)': 'Travel via Chase Travel portal',
+    'Travel via Chase Travel portal': 'Travel via Chase Travel portal',
+    'Travel (via CapOne Travel)': 'Travel via CapOne Travel',
+    'Hotels & Rental Cars via CapOne Travel': 'Hotels & Rental Cars via CapOne Travel',
+    'Flights via CapOne Travel': 'Flights via CapOne Travel',
+    'Travel booked via BofA Travel Center': 'Travel via BofA Travel Center',
+    'Prepaid Hotels (via Amex Travel)': 'Prepaid Hotels via Amex Travel',
+    'Travel (general, after $300 credit)': 'Travel (general, after $300 credit)',
+    'Flights via Chase Travel portal (5x) & Hotels/Car rentals via Chase Travel (10x)': 'Flights/Hotels/Car rentals via Chase Travel portal',
+    'Dining (restaurants & delivery)': 'Dining (restaurants & delivery)',
+    'Dining (restaurants)': 'Dining (restaurants)',
+    'Dining (incl. delivery)': 'Dining (restaurants & delivery)',
+    'Dining (up to $8k combined)': 'Dining (up to $8k combined)',
+    'Dining & Drugstores': 'Dining & Drugstores',
+    'Dining & Entertainment': 'Dining & Entertainment',
+    'Drugstore purchases': 'Drugstores',
+    'Grocery Stores & Wholesale Clubs': 'Grocery Stores & Wholesale Clubs',
+    'Grocery Stores (up to $8k combined)': 'Grocery Stores (up to $8k combined)',
+    'U.S. Supermarkets (up to $25k/yr)': 'U.S. Supermarkets (up to $25k/yr)',
+    'U.S. Supermarkets (up to $6k/yr)': 'U.S. Supermarkets (up to $6k/yr)',
+    'Online groceries & Streaming services': 'Online groceries & Streaming services',
+    'Popular Streaming Services': 'Popular Streaming Services',
+    'Amazon.com, Whole Foods, Amazon Fresh, Chase Travel': 'Amazon.com, Whole Foods, Amazon Fresh, Chase Travel',
+    'Amazon.com & Whole Foods (Prime members)': 'Amazon.com & Whole Foods (Prime members)',
+    'Target purchases (in-store and online)': 'Target purchases (in-store and online)',
+    'Marriott hotel purchases': 'Marriott hotel purchases',
+    'Gas Stations (up to $8k combined)': 'Gas Stations (up to $8k combined)',
+    'U.S. Gas Stations (up to $6k/yr)': 'U.S. Gas Stations (up to $6k/yr)',
+    'Gas & Restaurants (combined)': 'Gas & Restaurants (combined)',
+    'Everything Else': 'Other',
+    'Office Supply & Internet/Phone/Cable (combined)': 'Office Supply & Internet/Phone/Cable (combined)',
+    'Social Media/Search Ads & Internet/Phone services; Rideshare': 'Social Media/Search Ads & Internet/Phone services; Rideshare',
+    'Monthly spend over $1,000': 'Monthly spend over $1,000',
+    'Referrals (30-day window)': 'Referrals (30-day window)',
+    'Top 2 spend categories each month (ads, tech, dining, gas, transit, wireless)': 'Top 2 spend categories each month',
+    'Choice category (user-selected)': 'User-Selected Category',
+    'Rotating bonus categories (quarterly)': 'Rotating Category',
+    'Rotating quarterly categories': 'Rotating Category',
+    '3% category (user-selected quarterly)': 'User-Selected Category',
+    '2% category (user-selected quarterly)': 'User-Selected Category',
+    'Rapid Rewards hotel & car partners': 'Rapid Rewards hotel & car partners',
+    'United Airlines purchases': 'United Airlines purchases',
+    'Delta Air Lines purchases': 'Delta Air Lines purchases',
+    'Southwest Airlines purchases': 'Southwest Airlines purchases',
+    'Hotel stays': 'Hotel stays',
+    'Air Travel & Hotels': 'Air Travel & Hotels',
+    'Restaurants & Supermarkets': 'Restaurants & Supermarkets',
+    'U.S. Supermarkets & Gas (combined up to $6k/yr)': 'U.S. Supermarkets & Gas (combined up to $6k/yr)',
+    'Travel & Transit (global)': 'Travel & Transit (global)',
+    'Travel, Transit, Gas, Dining, Streaming, Phone Plans': 'Travel, Transit, Gas, Dining, Streaming, Phone Plans',
+    'Flights (booked directly or via Amex Travel)': 'Flights via Amex Travel',
+    'Flights (direct or Amex Travel)': 'Flights via Amex Travel',
+    'Prepaid Hotels (via Amex Travel)': 'Prepaid Hotels via Amex Travel',
+    'Hotels & Rental Cars via CapOne Travel': 'Hotels & Rental Cars via CapOne Travel',
+    'Travel booked via BofA Travel Center': 'Travel via BofA Travel Center',
+    'Travel (general, after $300 credit)': 'Travel (general, after $300 credit)',
+    'Travel via Chase Travel portal': 'Travel via Chase Travel portal',
+    'Travel (via Chase Travel portal)': 'Travel via Chase Travel portal',
+    'Travel (via CapOne Travel)': 'Travel via CapOne Travel',
+    'Travel (via BofA Travel Center)': 'Travel via BofA Travel Center',
+    'Prepaid Hotels (via Amex Travel)': 'Prepaid Hotels via Amex Travel',
+    'Travel (general, after $300 credit)': 'Travel (general, after $300 credit)',
+    'Flights via Chase Travel portal (5x) & Hotels/Car rentals via Chase Travel (10x)': 'Flights/Hotels/Car rentals via Chase Travel portal',
+}
+
+def build_category_hierarchy(df):
+    hierarchy = {}
+    for i in range(1, 4):
+        for _, row in df.iterrows():
+            raw_cat = str(row[f'bonus_category_{i}']).strip()
+            if not raw_cat or raw_cat == 'nan':
+                continue
+            norm_cat = manual.get(raw_cat, raw_cat)
+            parent = raw_cat.split()[0]
+            if isinstance(norm_cat, list):
+                for nc in norm_cat:
+                    if parent not in hierarchy:
+                        hierarchy[parent] = {"subcategories": set()}
+                    if nc != parent:
+                        hierarchy[parent]["subcategories"].add(nc)
+            else:
+                if parent not in hierarchy:
+                    hierarchy[parent] = {"subcategories": set()}
+                if norm_cat != parent:
+                    hierarchy[parent]["subcategories"].add(norm_cat)
+    # Remove redundant subcategories (normalize)
+    for parent in hierarchy:
+        hierarchy[parent]["subcategories"] = list(set(hierarchy[parent]["subcategories"]))
+        hierarchy[parent]["other"] = f"Other {parent}"
+    return hierarchy
+
 def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
     df = pd.read_csv(dataset_path)
     user_df = df[df['card_name'].isin(user_cards)].copy()
-    
-    def fmt(rate):
-        return f"{float(rate) * 100:.1f}%" if pd.notnull(rate) else ""
-    
-    def get_effective_rate(row, category_rate, is_points=False):
-        if pd.isnull(category_rate):
-            return 0
-        rate = float(category_rate)
-        if is_points:
-            point_value = float(row.get('base_redemption_value', 1))
-            rate *= point_value
-        return rate
-    
-    def is_true(val):
-        return str(val).strip().lower() in ['true', 'yes', '1']
-    def is_false(val):
-        return str(val).strip().lower() in ['false', 'no', '0', '']
-    
-    # Define regex patterns and priorities
-    category_patterns = [
-        (r"Amazon|Whole Foods|Amazon Fresh", "Amazon", 100),
-        (r"Target", "Target", 100),
-        (r"Nordstrom", "Nordstrom", 100),
-        (r"Marriott", "Marriott", 100),
-        (r"Southwest", "Southwest", 100),
-        (r"Delta", "Delta", 100),
-        (r"United", "United", 100),
-        (r"Office Supply", "Office Supply", 100),
-        (r"Rapid Rewards", "Rapid Rewards", 100),
-        (r"Social Media|Search Ads", "Social Media/Search Ads", 100),
-        (r"Referrals", "Referrals", 100),
-        (r"Monthly spend", "Monthly Spend", 100),
-        (r"Top 2 spend", "Top 2 Spend", 100),
-        (r"Choice category|user-selected", "User-Selected Category", 90),
-        (r"Prepaid Hotels", "Prepaid Hotels", 100),
-        (r"BofA Travel Center", "BofA Travel Center", 100),
-        (r"Dining|Restaurants", "Dining", 80),
-        (r"Groceries|Supermarkets|Grocery Stores|Wholesale Clubs", "Groceries", 80),
-        (r"Gas", "Gas", 80),
-        (r"Drugstore", "Drugstores", 80),
-        (r"Streaming", "Streaming", 80),
-        (r"Entertainment", "Entertainment", 80),
-        (r"Travel|Flights|Hotels|Car rentals|Transit", "Travel", 80),
-        (r"Online Retail|Online Shopping", "Online Shopping", 80),
-        (r"Phone|Internet|Cable|Wireless", "Phone/Internet", 80),
-        (r"Rideshare", "Rideshare", 80),
-        (r"Everything Else", "Everything Else", 10),
-        (r"Rotating", "Rotating Category", 50),
-        (r"activation required", "Activation Required", 50),
-    ]
-    canonical_categories = [p[1] for p in category_patterns if p[2] >= 80]
-    # Build card_category_matches using regex/priority
-    card_category_matches = []
+    hierarchy = build_category_hierarchy(df)
+    cat_to_cards = {}
     for _, row in user_df.iterrows():
         for i in range(1, 4):
-            bonus_cat = str(row.get(f'bonus_category_{i}', '')).strip()
-            bonus_rate = row.get(f'bonus_rate_{i}')
-            if not bonus_cat or bonus_cat == 'nan' or pd.isnull(bonus_rate):
+            raw_cat = str(row.get(f'bonus_category_{i}', '')).strip()
+            rate = row.get(f'bonus_rate_{i}')
+            if not raw_cat or raw_cat == 'nan' or pd.isnull(rate) or rate == 'no':
                 continue
-            for pattern, canonical, priority in category_patterns:
-                if re.search(pattern, bonus_cat, re.IGNORECASE):
-                    is_rotating = is_true(row.get('rotating_categories', False)) or re.search(r'Rotating', bonus_cat, re.IGNORECASE)
-                    is_activation = is_true(row.get('activation_required', False)) or re.search(r'activation required', bonus_cat, re.IGNORECASE)
-                    card_category_matches.append({
-                        'canonical_category': canonical,
-                        'rate': float(bonus_rate),
-                        'priority': priority,
-                        'card_name': row['card_name'],
+            try:
+                rate_val = float(rate)
+            except ValueError:
+                continue
+            norm_cat = manual.get(raw_cat, raw_cat)
+            parent = raw_cat.split()[0]
+            if isinstance(norm_cat, list):
+                for nc in norm_cat:
+                    if nc not in cat_to_cards:
+                        cat_to_cards[nc] = []
+                    cat_to_cards[nc].append({
+                        'card': row['card_name'],
+                        'rate': rate_val,
                         'currency_type': row.get('currency_type', 'CASHBACK'),
-                        'base_redemption_value': row.get('base_redemption_value', 1),
-                        'is_rotating': is_rotating,
-                        'is_activation': is_activation
+                        'base_redemption_value': row.get('base_redemption_value', 1)
                     })
-    # For each canonical category, pick the best card (highest priority, then highest rate)
-    recommendations = []
-    for cat in canonical_categories:
-        best = None
-        for match in card_category_matches:
-            if match['canonical_category'] == cat:
-                if (best is None or
-                    match['priority'] > best['priority'] or
-                    (match['priority'] == best['priority'] and match['rate'] > best['rate'])):
-                    best = match
-        if best:
-            if best['currency_type'] == 'POINTS':
-                point_value = float(best['base_redemption_value'])
-                reward_desc = f"{best['rate']*100:.1f}% points (equivalent to {best['rate']*point_value*100:.1f}% when redeemed)"
+                    if nc == parent:
+                        if f'Other {parent}' not in cat_to_cards:
+                            cat_to_cards[f'Other {parent}'] = []
+                        cat_to_cards[f'Other {parent}'].append({
+                            'card': row['card_name'],
+                            'rate': rate_val,
+                            'currency_type': row.get('currency_type', 'CASHBACK'),
+                            'base_redemption_value': row.get('base_redemption_value', 1)
+                        })
             else:
-                reward_desc = f"{best['rate']*100:.1f}% cashback"
-            instructions = ""
-            if best['is_rotating'] or best['is_activation']:
-                instructions = "Remember to activate this category"
-            recommendations.append({
-                "Category": cat,
-                "Card": best['card_name'],
-                "Reward Rate": reward_desc,
-                "Instructions": instructions
-            })
-    # Find best catch-all card(s)
-    best_catchall_rate = 0
-    catchall_cards = []
-    for _, row in user_df.iterrows():
-        base_rate = float(row.get('base_rate', 0))
-        if 'POINTS' in str(row.get('currency_type', '')):
-            point_value = float(row.get('base_redemption_value', 1))
-            effective_rate = base_rate * point_value
-        else:
-            effective_rate = base_rate
-        if effective_rate > best_catchall_rate:
-            best_catchall_rate = effective_rate
-            catchall_cards = [row['card_name']]
-        elif effective_rate == best_catchall_rate and effective_rate > 0:
-            catchall_cards.append(row['card_name'])
-    if catchall_cards and best_catchall_rate > 0:
-        card_infos = [user_df[user_df['card_name'] == c].iloc[0] for c in catchall_cards]
-        currency_type = str(card_infos[0].get('currency_type', 'CASHBACK'))
-        if currency_type == 'POINTS':
-            point_value = float(card_infos[0].get('base_redemption_value', 1))
-            reward_desc = f"{fmt(best_catchall_rate)} points (equivalent to {fmt(best_catchall_rate * point_value)} when redeemed)"
-        else:
-            reward_desc = f"{fmt(best_catchall_rate)} cashback"
-        card_names = ', '.join(catchall_cards)
-        utilization_note = "Track your credit line utilization across these cards to avoid negative credit score impact."
-        recommendations.append({
-            "Category": "Everything else",
-            "Card": card_names,
-            "Reward Rate": reward_desc,
-            "Instructions": f"Use any of these cards for all other purchases. {utilization_note}"
-        })
-    # Always add a separate recommendation for user-selectable cards' default category, even if already best
-    for _, row in user_df.iterrows():
-        if is_true(row.get('user_selectable_categories', False)):
-            default_cat = str(row.get('selectable_category_options', '')).split(',')[0].strip()
-            # Find the bonus rate for the default category
-            default_rate = None
-            for i in range(1, 4):
-                bonus_cat = str(row.get(f'bonus_category_{i}', '')).lower()
-                bonus_rate = row.get(f'bonus_rate_{i}')
-                if default_cat.lower() in bonus_cat:
-                    default_rate = bonus_rate
-                    break
-            # If not found, use the user-selected category rate
-            if default_rate is None:
-                for i in range(1, 4):
-                    bonus_cat = str(row.get(f'bonus_category_{i}', '')).lower()
-                    bonus_rate = row.get(f'bonus_rate_{i}')
-                    if 'choice category' in bonus_cat or 'user-selected' in bonus_cat:
-                        default_rate = bonus_rate
-                        break
-            if default_rate is not None:
-                currency_type = str(row.get('currency_type', 'CASHBACK'))
-                if currency_type == 'POINTS':
-                    point_value = float(row.get('base_redemption_value', 1))
-                    reward_desc = f"{fmt(default_rate)} points (equivalent to {fmt(float(default_rate) * point_value)} when redeemed)"
-                else:
-                    reward_desc = f"{fmt(default_rate)} cashback"
-                recommendations.append({
-                    "Category": default_cat,
-                    "Card": row['card_name'],
-                    "Reward Rate": reward_desc,
-                    "Instructions": f"You have {reward_desc} on {default_cat} for {row['card_name']}. Recommend changing to a high-spend category not covered by other cards."
+                if norm_cat not in cat_to_cards:
+                    cat_to_cards[norm_cat] = []
+                cat_to_cards[norm_cat].append({
+                    'card': row['card_name'],
+                    'rate': rate_val,
+                    'currency_type': row.get('currency_type', 'CASHBACK'),
+                    'base_redemption_value': row.get('base_redemption_value', 1)
                 })
+                if norm_cat == parent:
+                    if f'Other {parent}' not in cat_to_cards:
+                        cat_to_cards[f'Other {parent}'] = []
+                    cat_to_cards[f'Other {parent}'].append({
+                        'card': row['card_name'],
+                        'rate': rate_val,
+                        'currency_type': row.get('currency_type', 'CASHBACK'),
+                        'base_redemption_value': row.get('base_redemption_value', 1)
+                    })
+    recommendations = []
+    for parent, data in hierarchy.items():
+        for subcat in data['subcategories']:
+            if subcat in cat_to_cards:
+                best = max(cat_to_cards[subcat], key=lambda x: x['rate'])
+                reward_desc = f"{best['rate']*100:.1f}% cashback" if best['currency_type'] == 'CASHBACK' else f"{best['rate']*100:.1f}% points (equivalent to {best['rate']*float(best['base_redemption_value'])*100:.1f}% when redeemed)"
+                recommendations.append({
+                    'Category': subcat,
+                    'Card': best['card'],
+                    'Reward Rate': reward_desc,
+                    'Instructions': ''
+                })
+        other_cat = data['other']
+        if other_cat in cat_to_cards:
+            subcat_cards = set()
+            for subcat in data['subcategories']:
+                if subcat in cat_to_cards:
+                    subcat_cards.update([x['card'] for x in cat_to_cards[subcat]])
+            filtered = [x for x in cat_to_cards[other_cat] if x['card'] not in subcat_cards]
+            if filtered:
+                max_rate = max(x['rate'] for x in filtered)
+                bests = [x for x in filtered if x['rate'] == max_rate]
+                card_names = ', '.join([b['card'] for b in bests])
+                reward_desc = f"{max_rate*100:.1f}% cashback" if bests[0]['currency_type'] == 'CASHBACK' else f"{max_rate*100:.1f}% points (equivalent to {max_rate*float(bests[0]['base_redemption_value'])*100:.1f}% when redeemed)"
+                recommendations.append({
+                    'Category': other_cat,
+                    'Card': card_names,
+                    'Reward Rate': reward_desc,
+                    'Instructions': f'Use for all {parent.lower()} purchases not covered by a more specific category.'
+                })
+    # Rent handling (as before)
+    rent_recommendations = []
+    for _, row in user_df.iterrows():
+        rent_cap = str(row.get('rent_payment_capability', '')).strip().lower()
+        if rent_cap in ['yes', 'limited']:
+            rewards = str(row.get('rewards_on_rent', '')).strip()
+            fee = str(row.get('transaction_fee', '')).strip()
+            notes = str(row.get('notes_rent_payments', '')).strip()
+            card_name = row['card_name']
+            fee_val = 9999
+            try:
+                if fee.startswith('$'):
+                    fee_val = float(fee.replace('$','').replace(',',''))
+                elif fee.lower() == 'varies':
+                    fee_val = 1000
+                elif fee == '':
+                    fee_val = 9999
+                else:
+                    fee_val = float(fee)
+            except:
+                fee_val = 9999
+            rent_recommendations.append({
+                'card_name': card_name,
+                'rewards': rewards,
+                'fee': fee_val,
+                'fee_str': fee,
+                'cap': rent_cap,
+                'notes': notes
+            })
+    rent_recommendations.sort(key=lambda x: (x['cap'] != 'yes', x['fee']))
+    if rent_recommendations:
+        best = rent_recommendations[0]
+        instructions = f"Use this card for rent payments. Fee: {best['fee_str']}. {best['notes']}".strip()
+        recommendations.append({
+            'Category': 'Rent',
+            'Card': best['card_name'],
+            'Reward Rate': best['rewards'],
+            'Instructions': instructions
+        })
     return recommendations
 
 # API endpoint
@@ -210,3 +262,65 @@ async def recommend(request: Request):
     }).execute()
 
     return {"recommendations": recommendations}
+
+def load_category_hierarchy(json_path="categories.json"):
+    with open(json_path, "r") as f:
+        return json.load(f)
+
+def map_to_general_category(bonus_category, category_hierarchy):
+    for general, data in category_hierarchy.items():
+        for kw in data["keywords"]:
+            if re.search(kw, bonus_category, re.IGNORECASE):
+                return general
+    return None
+
+def match_subcategory(general_category, bonus_category, category_hierarchy):
+    subcats = category_hierarchy[general_category].get("subcategories", {})
+    for subcat, subdata in subcats.items():
+        for pat in subdata["patterns"]:
+            if re.search(pat, bonus_category, re.IGNORECASE):
+                return subcat, subdata["priority"]
+    return None, 0
+
+def get_all_cards():
+    cards = []
+    with open('cards_dataset.csv', 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            card_name_key = 'card_name' if 'card_name' in row else '\ufeffcard_name'
+            card = {
+                'name': row[card_name_key],
+                'bonus_categories': {}
+            }
+            for key, value in row.items():
+                if key != card_name_key:
+                    card['bonus_categories'][key] = value
+            cards.append(card)
+    return cards
+
+def optimize_credit_card_usage(cards):
+    # Placeholder for the old logic
+    return {}
+
+if __name__ == "__main__":
+    test_cards = ["Chase Sapphire Preferred", "Bilt Mastercard", "Amazon Prime Rewards Visa", "Chase Freedom Flex"]
+    print("\nRaw rates for 'Other Travel':")
+    df = pd.read_csv("cards_dataset.csv")
+    user_df = df[df['card_name'].isin(test_cards)].copy()
+    for _, row in user_df.iterrows():
+        for i in range(1, 5):
+            cat = str(row.get(f'bonus_category_{i}', '')).strip()
+            rate = row.get(f'bonus_rate_{i}')
+            if cat == 'Travel' and pd.notnull(rate):
+                print(f"{row['card_name']}: {rate} ({float(rate)*100:.0f}% if rate is numeric)")
+    print("\nRaw rates for 'Travel (outside Chase portal)':")
+    found = False
+    for _, row in user_df.iterrows():
+        for i in range(1, 5):
+            cat = str(row.get(f'bonus_category_{i}', '')).strip()
+            rate = row.get(f'bonus_rate_{i}')
+            if cat == 'Travel (outside Chase portal)' and pd.notnull(rate):
+                print(f"{row['card_name']}: {rate} ({float(rate)*100:.0f}% if rate is numeric)")
+                found = True
+    if not found:
+        print("No rates found.")
