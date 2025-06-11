@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import List
 import pandas as pd
 import os
+import re
 # from supabase import create_client, Client  # Move import inside app section
 
 app = FastAPI()
@@ -40,57 +41,88 @@ def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
     
     def is_true(val):
         return str(val).strip().lower() in ['true', 'yes', '1']
+    def is_false(val):
+        return str(val).strip().lower() in ['false', 'no', '0', '']
     
-    categories = {
-        'Dining': ['Dining', 'Restaurants', 'Restaurants worldwide'],
-        'Travel': ['Travel', 'Flights', 'Hotels', 'Air Travel'],
-        'Groceries': ['Supermarkets', 'Grocery Stores', 'U.S. Supermarkets'],
-        'Gas': ['Gas', 'Gas Stations'],
-        'Online Shopping': ['Online Shopping', 'Online Retail'],
-        'Entertainment': ['Entertainment', 'Streaming Services'],
-        'Drugstores': ['Drugstores', 'Drug Stores']
-    }
-    
+    # Define regex patterns and priorities
+    category_patterns = [
+        (r"Amazon|Whole Foods|Amazon Fresh", "Amazon", 100),
+        (r"Target", "Target", 100),
+        (r"Nordstrom", "Nordstrom", 100),
+        (r"Marriott", "Marriott", 100),
+        (r"Southwest", "Southwest", 100),
+        (r"Delta", "Delta", 100),
+        (r"United", "United", 100),
+        (r"Office Supply", "Office Supply", 100),
+        (r"Rapid Rewards", "Rapid Rewards", 100),
+        (r"Social Media|Search Ads", "Social Media/Search Ads", 100),
+        (r"Referrals", "Referrals", 100),
+        (r"Monthly spend", "Monthly Spend", 100),
+        (r"Top 2 spend", "Top 2 Spend", 100),
+        (r"Choice category|user-selected", "User-Selected Category", 90),
+        (r"Prepaid Hotels", "Prepaid Hotels", 100),
+        (r"BofA Travel Center", "BofA Travel Center", 100),
+        (r"Dining|Restaurants", "Dining", 80),
+        (r"Groceries|Supermarkets|Grocery Stores|Wholesale Clubs", "Groceries", 80),
+        (r"Gas", "Gas", 80),
+        (r"Drugstore", "Drugstores", 80),
+        (r"Streaming", "Streaming", 80),
+        (r"Entertainment", "Entertainment", 80),
+        (r"Travel|Flights|Hotels|Car rentals|Transit", "Travel", 80),
+        (r"Online Retail|Online Shopping", "Online Shopping", 80),
+        (r"Phone|Internet|Cable|Wireless", "Phone/Internet", 80),
+        (r"Rideshare", "Rideshare", 80),
+        (r"Everything Else", "Everything Else", 10),
+        (r"Rotating", "Rotating Category", 50),
+        (r"activation required", "Activation Required", 50),
+    ]
+    canonical_categories = [p[1] for p in category_patterns if p[2] >= 80]
+    # Build card_category_matches using regex/priority
+    card_category_matches = []
+    for _, row in user_df.iterrows():
+        for i in range(1, 4):
+            bonus_cat = str(row.get(f'bonus_category_{i}', '')).strip()
+            bonus_rate = row.get(f'bonus_rate_{i}')
+            if not bonus_cat or bonus_cat == 'nan' or pd.isnull(bonus_rate):
+                continue
+            for pattern, canonical, priority in category_patterns:
+                if re.search(pattern, bonus_cat, re.IGNORECASE):
+                    is_rotating = is_true(row.get('rotating_categories', False)) or re.search(r'Rotating', bonus_cat, re.IGNORECASE)
+                    is_activation = is_true(row.get('activation_required', False)) or re.search(r'activation required', bonus_cat, re.IGNORECASE)
+                    card_category_matches.append({
+                        'canonical_category': canonical,
+                        'rate': float(bonus_rate),
+                        'priority': priority,
+                        'card_name': row['card_name'],
+                        'currency_type': row.get('currency_type', 'CASHBACK'),
+                        'base_redemption_value': row.get('base_redemption_value', 1),
+                        'is_rotating': is_rotating,
+                        'is_activation': is_activation
+                    })
+    # For each canonical category, pick the best card (highest priority, then highest rate)
     recommendations = []
-    covered_categories = set()
-    best_cards_by_category = {}
-    
-    # Find best card for each category
-    for category, keywords in categories.items():
-        best_card = None
-        best_rate = 0
-        best_instructions = ""
-        best_row = None
-        for _, row in user_df.iterrows():
-            for i in range(1, 4):
-                bonus_cat = str(row.get(f'bonus_category_{i}', '')).lower()
-                bonus_rate = row.get(f'bonus_rate_{i}')
-                if any(keyword.lower() in bonus_cat for keyword in keywords):
-                    effective_rate = get_effective_rate(row, bonus_rate, 'POINTS' in str(row.get('currency_type', '')))
-                    if effective_rate > best_rate:
-                        best_rate = effective_rate
-                        best_card = row['card_name']
-                        best_row = row
-                        # Only show activation/rotating instructions if needed and not for set-rate
-                        if ((row.get('rotating_categories', False) or row.get('activation_required', False)) and not is_true(row.get('user_selectable_categories', False))):
-                            best_instructions = f"Remember to activate this category"
-                        else:
-                            best_instructions = ""
-        if best_card:
-            covered_categories.add(category)
-            best_cards_by_category[category] = best_card
-            card_info = user_df[user_df['card_name'] == best_card].iloc[0]
-            currency_type = str(card_info.get('currency_type', 'CASHBACK'))
-            if currency_type == 'POINTS':
-                point_value = float(card_info.get('base_redemption_value', 1))
-                reward_desc = f"{fmt(best_rate)} points (equivalent to {fmt(best_rate * point_value)} when redeemed)"
+    for cat in canonical_categories:
+        best = None
+        for match in card_category_matches:
+            if match['canonical_category'] == cat:
+                if (best is None or
+                    match['priority'] > best['priority'] or
+                    (match['priority'] == best['priority'] and match['rate'] > best['rate'])):
+                    best = match
+        if best:
+            if best['currency_type'] == 'POINTS':
+                point_value = float(best['base_redemption_value'])
+                reward_desc = f"{best['rate']*100:.1f}% points (equivalent to {best['rate']*point_value*100:.1f}% when redeemed)"
             else:
-                reward_desc = f"{fmt(best_rate)} cashback"
+                reward_desc = f"{best['rate']*100:.1f}% cashback"
+            instructions = ""
+            if best['is_rotating'] or best['is_activation']:
+                instructions = "Remember to activate this category"
             recommendations.append({
-                "Category": category,
-                "Card": best_card,
+                "Category": cat,
+                "Card": best['card_name'],
                 "Reward Rate": reward_desc,
-                "Instructions": best_instructions
+                "Instructions": instructions
             })
     # Find best catch-all card(s)
     best_catchall_rate = 0
