@@ -1,0 +1,169 @@
+{
+  "Travel": {
+    "keywords": ["Travel", "Flights", "Hotels", "Air Travel", "Car rentals", "Transit"],
+    "subcategories": {
+      "Travel (via Chase Travel portal)": {
+        "patterns": ["Travel \\(via Chase Travel portal\\)", "Flights via Chase Travel portal"],
+        "priority": 100
+      },
+      "Travel (via CapOne Travel)": {
+        "patterns": ["Hotels & Rental Cars via CapOne Travel", "Flights via CapOne Travel"],
+        "priority": 100
+      },
+      "Travel (via BofA Travel Center)": {
+        "patterns": ["Travel booked via BofA Travel Center"],
+        "priority": 100
+      },
+      "Prepaid Hotels (via Amex Travel)": {
+        "patterns": ["Prepaid Hotels \\(via Amex Travel\\)"] ,
+        "priority": 100
+      },
+      "Travel (general, after $300 credit)": {
+        "patterns": ["Travel \\(general, after \\$300 credit\\)"] ,
+        "priority": 100
+      }
+    }
+  },
+  "Dining": {
+    "keywords": ["Dining", "Restaurants"],
+    "subcategories": {
+      "Dining (restaurants & delivery)": {
+        "patterns": ["Dining \\(restaurants & delivery\\)"] ,
+        "priority": 100
+      },
+      "Dining & Drugstores": {
+        "patterns": ["Dining & Drugstores"],
+        "priority": 100
+      },
+      "Dining (incl. delivery)": {
+        "patterns": ["Dining \\(incl. delivery\\)"] ,
+        "priority": 100
+      },
+      "Dining (up to $8k combined)": {
+        "patterns": ["Dining \\(up to \\$8k combined\\)"] ,
+        "priority": 100
+      }
+    }
+  },
+  "Groceries": {
+    "keywords": ["Groceries", "Supermarkets", "Grocery Stores", "Wholesale Clubs"],
+    "subcategories": {
+      "Online groceries & Streaming services": {
+        "patterns": ["Online groceries & Streaming services"],
+        "priority": 100
+      },
+      "Grocery Stores & Wholesale Clubs": {
+        "patterns": ["Grocery Stores & Wholesale Clubs"],
+        "priority": 100
+      },
+      "Grocery Stores (up to $8k combined)": {
+        "patterns": ["Grocery Stores \\(up to \\$8k combined\\)"] ,
+        "priority": 100
+      },
+      "U.S. Supermarkets (up to $25k/yr)": {
+        "patterns": ["U.S. Supermarkets \\(up to \\$25k/yr\\)"] ,
+        "priority": 100
+      },
+      "U.S. Supermarkets (up to $6k/yr)": {
+        "patterns": ["U.S. Supermarkets \\(up to \\$6k/yr\\)"] ,
+        "priority": 100
+      }
+    }
+  },
+  "Gas": {
+    "keywords": ["Gas"],
+    "subcategories": {
+      "Gas Stations (up to $8k combined)": {
+        "patterns": ["Gas Stations \\(up to \\$8k combined\\)"] ,
+        "priority": 100
+      },
+      "U.S. Gas Stations (up to $6k/yr)": {
+        "patterns": ["U.S. Gas Stations \\(up to \\$6k/yr\\)"] ,
+        "priority": 100
+      },
+      "Gas & Restaurants (combined)": {
+        "patterns": ["Gas & Restaurants \\(combined\\)"] ,
+        "priority": 100
+      }
+    }
+  },
+  "Online Shopping": {
+    "keywords": ["Online Shopping", "Online Retail"],
+    "subcategories": {
+      "U.S. Online Retail (up to $6k/yr)": {
+        "patterns": ["U.S. Online Retail \\(up to \\$6k/yr\\)"] ,
+        "priority": 100
+      }
+    }
+  },
+  "Streaming": {
+    "keywords": ["Streaming"],
+    "subcategories": {
+      "Popular Streaming Services": {
+        "patterns": ["Popular Streaming Services"],
+        "priority": 100
+      },
+      "Online groceries & Streaming services": {
+        "patterns": ["Online groceries & Streaming services"],
+        "priority": 100
+      }
+    }
+  },
+  "Drugstores": {
+    "keywords": ["Drugstores", "Drugstore"],
+    "subcategories": {
+      "Dining & Drugstores": {
+        "patterns": ["Dining & Drugstores"],
+        "priority": 100
+      },
+      "Drugstore purchases": {
+        "patterns": ["Drugstore purchases"],
+        "priority": 100
+      }
+    }
+  },
+  "Entertainment": {
+    "keywords": ["Entertainment"],
+    "subcategories": {
+      "Dining & Entertainment": {
+        "patterns": ["Dining & Entertainment"],
+        "priority": 100
+      }
+    }
+  },
+  "Amazon": {
+    "keywords": ["Amazon", "Whole Foods", "Amazon Fresh"],
+    "subcategories": {
+      "Amazon.com & Whole Foods (Prime members)": {
+        "patterns": ["Amazon.com & Whole Foods \\(Prime members\\)"] ,
+        "priority": 100
+      },
+      "Amazon.com, Whole Foods, Amazon Fresh, Chase Travel": {
+        "patterns": ["Amazon.com, Whole Foods, Amazon Fresh, Chase Travel"],
+        "priority": 100
+      }
+    }
+  },
+  "Target": {
+    "keywords": ["Target"],
+    "subcategories": {
+      "Target purchases (in-store and online)": {
+        "patterns": ["Target purchases \\(in-store and online\\)"] ,
+        "priority": 100
+      }
+    }
+  },
+  "Marriott": {
+    "keywords": ["Marriott"],
+    "subcategories": {
+      "Marriott hotel purchases": {
+        "patterns": ["Marriott hotel purchases"],
+        "priority": 100
+      }
+    }
+  },
+  "Other": {
+    "keywords": ["Everything Else"],
+    "subcategories": {}
+  }
+} 
