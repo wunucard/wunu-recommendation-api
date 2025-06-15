@@ -117,129 +117,26 @@ def build_category_hierarchy(df):
         hierarchy[parent]["other"] = f"Other {parent}"
     return hierarchy
 
-def optimize_credit_card_usage(user_cards, dataset_path="cards_dataset.csv"):
-    df = pd.read_csv(dataset_path)
-    user_df = df[df['card_name'].isin(user_cards)].copy()
-    hierarchy = build_category_hierarchy(df)
-    cat_to_cards = {}
-    for _, row in user_df.iterrows():
-        for i in range(1, 4):
-            raw_cat = str(row.get(f'bonus_category_{i}', '')).strip()
-            rate = row.get(f'bonus_rate_{i}')
-            if not raw_cat or raw_cat == 'nan' or pd.isnull(rate) or rate == 'no':
-                continue
-            try:
-                rate_val = float(rate)
-            except ValueError:
-                continue
-            norm_cat = manual.get(raw_cat, raw_cat)
-            parent = raw_cat.split()[0]
-            if isinstance(norm_cat, list):
-                for nc in norm_cat:
-                    if nc not in cat_to_cards:
-                        cat_to_cards[nc] = []
-                    cat_to_cards[nc].append({
-                        'card': row['card_name'],
-                        'rate': rate_val,
-                        'currency_type': row.get('currency_type', 'CASHBACK'),
-                        'base_redemption_value': row.get('base_redemption_value', 1)
-                    })
-                    if nc == parent:
-                        if f'Other {parent}' not in cat_to_cards:
-                            cat_to_cards[f'Other {parent}'] = []
-                        cat_to_cards[f'Other {parent}'].append({
-                            'card': row['card_name'],
-                            'rate': rate_val,
-                            'currency_type': row.get('currency_type', 'CASHBACK'),
-                            'base_redemption_value': row.get('base_redemption_value', 1)
-                        })
-            else:
-                if norm_cat not in cat_to_cards:
-                    cat_to_cards[norm_cat] = []
-                cat_to_cards[norm_cat].append({
-                    'card': row['card_name'],
-                    'rate': rate_val,
-                    'currency_type': row.get('currency_type', 'CASHBACK'),
-                    'base_redemption_value': row.get('base_redemption_value', 1)
-                })
-                if norm_cat == parent:
-                    if f'Other {parent}' not in cat_to_cards:
-                        cat_to_cards[f'Other {parent}'] = []
-                    cat_to_cards[f'Other {parent}'].append({
-                        'card': row['card_name'],
-                        'rate': rate_val,
-                        'currency_type': row.get('currency_type', 'CASHBACK'),
-                        'base_redemption_value': row.get('base_redemption_value', 1)
-                    })
-    recommendations = []
-    for parent, data in hierarchy.items():
-        for subcat in data['subcategories']:
-            if subcat in cat_to_cards:
-                best = max(cat_to_cards[subcat], key=lambda x: x['rate'])
-                reward_desc = f"{best['rate']*100:.1f}% cashback" if best['currency_type'] == 'CASHBACK' else f"{best['rate']*100:.1f}% points (equivalent to {best['rate']*float(best['base_redemption_value'])*100:.1f}% when redeemed)"
-                recommendations.append({
-                    'Category': subcat,
-                    'Card': best['card'],
-                    'Reward Rate': reward_desc,
-                    'Instructions': ''
-                })
-        other_cat = data['other']
-        if other_cat in cat_to_cards:
-            subcat_cards = set()
-            for subcat in data['subcategories']:
-                if subcat in cat_to_cards:
-                    subcat_cards.update([x['card'] for x in cat_to_cards[subcat]])
-            filtered = [x for x in cat_to_cards[other_cat] if x['card'] not in subcat_cards]
-            if filtered:
-                max_rate = max(x['rate'] for x in filtered)
-                bests = [x for x in filtered if x['rate'] == max_rate]
-                card_names = ', '.join([b['card'] for b in bests])
-                reward_desc = f"{max_rate*100:.1f}% cashback" if bests[0]['currency_type'] == 'CASHBACK' else f"{max_rate*100:.1f}% points (equivalent to {max_rate*float(bests[0]['base_redemption_value'])*100:.1f}% when redeemed)"
-                recommendations.append({
-                    'Category': other_cat,
-                    'Card': card_names,
-                    'Reward Rate': reward_desc,
-                    'Instructions': f'Use for all {parent.lower()} purchases not covered by a more specific category.'
-                })
-    # Rent handling (as before)
-    rent_recommendations = []
-    for _, row in user_df.iterrows():
-        rent_cap = str(row.get('rent_payment_capability', '')).strip().lower()
-        if rent_cap in ['yes', 'limited']:
-            rewards = str(row.get('rewards_on_rent', '')).strip()
-            fee = str(row.get('transaction_fee', '')).strip()
-            notes = str(row.get('notes_rent_payments', '')).strip()
-            card_name = row['card_name']
-            fee_val = 9999
-            try:
-                if fee.startswith('$'):
-                    fee_val = float(fee.replace('$','').replace(',',''))
-                elif fee.lower() == 'varies':
-                    fee_val = 1000
-                elif fee == '':
-                    fee_val = 9999
-                else:
-                    fee_val = float(fee)
-            except:
-                fee_val = 9999
-            rent_recommendations.append({
-                'card_name': card_name,
-                'rewards': rewards,
-                'fee': fee_val,
-                'fee_str': fee,
-                'cap': rent_cap,
-                'notes': notes
-            })
-    rent_recommendations.sort(key=lambda x: (x['cap'] != 'yes', x['fee']))
-    if rent_recommendations:
-        best = rent_recommendations[0]
-        instructions = f"Use this card for rent payments. Fee: {best['fee_str']}. {best['notes']}".strip()
-        recommendations.append({
-            'Category': 'Rent',
-            'Card': best['card_name'],
-            'Reward Rate': best['rewards'],
-            'Instructions': instructions
-        })
+def optimize_credit_card_usage(cards, test_cards):
+    recommendations = {}
+    for card in cards:
+        if card['name'] in test_cards:
+            for i in range(1, 5):
+                bonus_rate_key = f'bonus_rate_{i}'
+                if bonus_rate_key in card['bonus_categories']:
+                    bonus_rate = card['bonus_categories'][bonus_rate_key]
+                    for j in range(1, 5):
+                        main_category_key = f'main_category_{i}.{j}'
+                        if main_category_key in card['bonus_categories']:
+                            category = card['bonus_categories'][main_category_key]
+                            if category and category.strip():  # Check if category is not blank
+                                if category not in recommendations:
+                                    recommendations[category] = []
+                                try:
+                                    rate_float = float(bonus_rate) if bonus_rate else 0
+                                    recommendations[category].append((card['name'], rate_float))
+                                except ValueError:
+                                    continue
     return recommendations
 
 # API endpoint
@@ -252,7 +149,7 @@ async def recommend(request: Request):
     )
     data = await request.json()
     cards = data.get("cards", [])
-    recommendations = optimize_credit_card_usage(cards)
+    recommendations = optimize_credit_card_usage(cards, cards)
 
     # Log the query
     supabase.table("recommendation_logs").insert({
@@ -284,7 +181,7 @@ def match_subcategory(general_category, bonus_category, category_hierarchy):
 
 def get_all_cards():
     cards = []
-    with open('cards_dataset.csv', 'r') as f:
+    with open('cards_dataset.v03.csv', 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             card_name_key = 'card_name' if 'card_name' in row else '\ufeffcard_name'
@@ -298,14 +195,11 @@ def get_all_cards():
             cards.append(card)
     return cards
 
-def optimize_credit_card_usage(cards):
-    # Placeholder for the old logic
-    return {}
-
 if __name__ == "__main__":
-    test_cards = ["Chase Sapphire Preferred", "Bilt Mastercard", "Amazon Prime Rewards Visa", "Chase Freedom Flex"]
+    # User selection of cards
+    test_cards = []  # This will be populated with user-selected cards
     print("\nRaw rates for 'Other Travel':")
-    df = pd.read_csv("cards_dataset.csv")
+    df = pd.read_csv("cards_dataset.v03.csv")
     user_df = df[df['card_name'].isin(test_cards)].copy()
     for _, row in user_df.iterrows():
         for i in range(1, 5):
@@ -324,3 +218,29 @@ if __name__ == "__main__":
                 found = True
     if not found:
         print("No rates found.")
+
+    # Generate personalized recommendations
+    all_cards = get_all_cards()
+    recommendations = optimize_credit_card_usage(all_cards, test_cards)
+    print("\nPersonalized Credit Card Recommendations:")
+    for category, card_rates in recommendations.items():
+        if not card_rates:
+            continue
+        max_rate = max(card_rates, key=lambda x: x[1])[1]
+        max_cards = [card for card, rate in card_rates if rate == max_rate]
+        default_rate = 0.01  # Assuming default rate is 1%
+        if max_rate > default_rate:
+            print(f"{category}:")
+            if len(max_cards) > 1:
+                print(f"- Use either {', '.join(max_cards)} for {category} purchases ({max_rate*100:.1f}% back)")
+            else:
+                print(f"- Use {max_cards[0]} for {category} purchases ({max_rate*100:.1f}% back)")
+            for card, rate in card_rates:
+                if card not in max_cards and rate > default_rate:
+                    print(f"- Use {card} for all other purchases in {category} ({rate*100:.1f}% back)")
+    print("\nCatch-all Card Recommendations:")
+    base_rate = 0.01  # Assuming base rate is 1%
+    if len(test_cards) > 1:
+        print(f"- Use either {', '.join(test_cards)} as a catch-all card ({base_rate*100:.1f}% back)")
+    else:
+        print(f"- Use {test_cards[0]} as a catch-all card ({base_rate*100:.1f}% back)")
