@@ -141,24 +141,55 @@ def optimize_credit_card_usage(cards, test_cards):
 
 # API endpoint
 @app.post("/recommend")
-async def recommend(request: Request):
-    from supabase import create_client, Client
-    supabase: Client = create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_KEY")
-    )
-    data = await request.json()
-    cards = data.get("cards", [])
-    recommendations = optimize_credit_card_usage(cards, cards)
-
-    # Log the query
-    supabase.table("recommendation_logs").insert({
-        "cards": cards,
-        "ip_address": request.client.host,
-        "user_agent": request.headers.get("user-agent")
-    }).execute()
-
-    return {"recommendations": recommendations}
+async def recommend(request: CardRequest):
+    cards = request.cards
+    recommendations = optimize_credit_card_usage(get_all_cards(), cards)
+    formatted_recommendations = []
+    for category, card_rates in recommendations.items():
+        if not card_rates:
+            continue
+        max_rate = max(card_rates, key=lambda x: x[1])[1]
+        max_cards = [card for card, rate in card_rates if rate == max_rate]
+        default_rate = 0.01  # Assuming default rate is 1%
+        if max_rate > default_rate:
+            if len(max_cards) > 1:
+                formatted_recommendations.append({
+                    "Category": category,
+                    "Card": ", ".join(max_cards),
+                    "Reward Rate": f"{max_rate*100:.1f}%",
+                    "Instructions": f"Use either {', '.join(max_cards)} for {category} purchases"
+                })
+            else:
+                formatted_recommendations.append({
+                    "Category": category,
+                    "Card": max_cards[0],
+                    "Reward Rate": f"{max_rate*100:.1f}%",
+                    "Instructions": f"Use {max_cards[0]} for {category} purchases"
+                })
+            for card, rate in card_rates:
+                if card not in max_cards and rate > default_rate:
+                    formatted_recommendations.append({
+                        "Category": category,
+                        "Card": card,
+                        "Reward Rate": f"{rate*100:.1f}%",
+                        "Instructions": f"Use {card} for all other purchases in {category}"
+                    })
+    base_rate = 0.01  # Assuming base rate is 1%
+    if len(cards) > 1:
+        formatted_recommendations.append({
+            "Category": "Catch-all",
+            "Card": ", ".join(cards),
+            "Reward Rate": f"{base_rate*100:.1f}%",
+            "Instructions": f"Use either {', '.join(cards)} as a catch-all card"
+        })
+    else:
+        formatted_recommendations.append({
+            "Category": "Catch-all",
+            "Card": cards[0],
+            "Reward Rate": f"{base_rate*100:.1f}%",
+            "Instructions": f"Use {cards[0]} as a catch-all card"
+        })
+    return {"recommendations": formatted_recommendations}
 
 def load_category_hierarchy(json_path="categories.json"):
     with open(json_path, "r") as f:
