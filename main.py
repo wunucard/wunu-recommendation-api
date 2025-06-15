@@ -120,7 +120,7 @@ def build_category_hierarchy(df):
 def optimize_credit_card_usage(cards, test_cards):
     recommendations = {}
     for card in cards:
-        if card['name'] in test_cards:
+        if isinstance(card, dict) and 'name' in card and card['name'] in test_cards:
             for i in range(1, 5):
                 bonus_rate_key = f'bonus_rate_{i}'
                 if bonus_rate_key in card['bonus_categories']:
