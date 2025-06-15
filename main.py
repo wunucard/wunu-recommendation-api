@@ -144,6 +144,7 @@ def optimize_credit_card_usage(cards, test_cards):
 async def recommend(request: CardRequest):
     cards = request.cards
     recommendations = optimize_credit_card_usage(get_all_cards(), cards)
+    category_hierarchy = load_category_hierarchy()
     formatted_recommendations = []
     for category, card_rates in recommendations.items():
         if not card_rates:
@@ -152,42 +153,53 @@ async def recommend(request: CardRequest):
         max_cards = [card for card, rate in card_rates if rate == max_rate]
         default_rate = 0.01  # Assuming default rate is 1%
         if max_rate > default_rate:
+            subcategory, priority = match_subcategory(category, category, category_hierarchy)
             if len(max_cards) > 1:
                 formatted_recommendations.append({
                     "Category": category,
+                    "Subcategory": subcategory,
                     "Card": ", ".join(max_cards),
                     "Reward Rate": f"{max_rate*100:.1f}%",
-                    "Instructions": f"Use either {', '.join(max_cards)} for {category} purchases"
+                    "Instructions": f"Use either {', '.join(max_cards)} for {category} purchases",
+                    "Restrictions": f"Priority: {priority}"
                 })
             else:
                 formatted_recommendations.append({
                     "Category": category,
+                    "Subcategory": subcategory,
                     "Card": max_cards[0],
                     "Reward Rate": f"{max_rate*100:.1f}%",
-                    "Instructions": f"Use {max_cards[0]} for {category} purchases"
+                    "Instructions": f"Use {max_cards[0]} for {category} purchases",
+                    "Restrictions": f"Priority: {priority}"
                 })
             for card, rate in card_rates:
                 if card not in max_cards and rate > default_rate:
                     formatted_recommendations.append({
                         "Category": category,
+                        "Subcategory": subcategory,
                         "Card": card,
                         "Reward Rate": f"{rate*100:.1f}%",
-                        "Instructions": f"Use {card} for all other purchases in {category}"
+                        "Instructions": f"Use {card} for all other purchases in {category}",
+                        "Restrictions": f"Priority: {priority}"
                     })
     base_rate = 0.01  # Assuming base rate is 1%
     if len(cards) > 1:
         formatted_recommendations.append({
             "Category": "Catch-all",
+            "Subcategory": "None",
             "Card": ", ".join(cards),
             "Reward Rate": f"{base_rate*100:.1f}%",
-            "Instructions": f"Use either {', '.join(cards)} as a catch-all card"
+            "Instructions": f"Use either {', '.join(cards)} as a catch-all card",
+            "Restrictions": "None"
         })
     else:
         formatted_recommendations.append({
             "Category": "Catch-all",
+            "Subcategory": "None",
             "Card": cards[0],
             "Reward Rate": f"{base_rate*100:.1f}%",
-            "Instructions": f"Use {cards[0]} as a catch-all card"
+            "Instructions": f"Use {cards[0]} as a catch-all card",
+            "Restrictions": "None"
         })
     return {"recommendations": formatted_recommendations}
 
@@ -203,6 +215,9 @@ def map_to_general_category(bonus_category, category_hierarchy):
     return None
 
 def match_subcategory(general_category, bonus_category, category_hierarchy):
+    if general_category not in category_hierarchy:
+        print(f"Warning: General category '{general_category}' not found in category hierarchy.")
+        return None, 0
     subcats = category_hierarchy[general_category].get("subcategories", {})
     for subcat, subdata in subcats.items():
         for pat in subdata["patterns"]:
